@@ -29,7 +29,7 @@ func toRawKubeConfigLoader(kubeContext string, kubeConfigPath string) clientcmd.
 	return kubeConfig
 }
 
-func NewKubeClient(kubeContext string, kubeConfigPath string) (*kubernetes.Clientset, error) {
+func (k *KubeClientConf) NewKubeClient() (*kubernetes.Clientset, error) {
 	userHomeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Printf("error getting user home dir: %v\n", err)
@@ -37,11 +37,11 @@ func NewKubeClient(kubeContext string, kubeConfigPath string) (*kubernetes.Clien
 	}
 
 	// alow custom kubeConfigPath to be passed
-	if kubeConfigPath == "" {
-		kubeConfigPath = filepath.Join(userHomeDir, ".kube", "config")
+	if k.Path == "" {
+		k.Path = filepath.Join(userHomeDir, ".kube", "config")
 	}
 
-	kubeConfig, err := toRawKubeConfigLoader(kubeContext, kubeConfigPath).ClientConfig()
+	kubeConfig, err := toRawKubeConfigLoader(k.Context, k.Path).ClientConfig()
 	if err != nil {
 		fmt.Printf("error getting Kubernetes config: %v\n", err)
 		return nil, err

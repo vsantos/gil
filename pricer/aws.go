@@ -1,4 +1,4 @@
-package price
+package pricer
 
 import (
 	"fmt"
@@ -7,9 +7,32 @@ import (
 	ec2instancesinfo "github.com/cristim/ec2-instances-info"
 )
 
-type AwsPricing struct{}
+type ProviderAWS struct{}
 
-func (a *AwsPricing) List() ProviderNodes {
+type ProviderInterface interface {
+	Nodes() ProviderNodesInterface
+}
+
+type ProviderNodesInterface interface {
+	Prices() PriceInterface
+}
+
+type PriceInterface interface {
+	List() ProviderNodes
+}
+
+func (a *ProviderAWS) Nodes() ProviderNodesInterface {
+	fmt.Println("price nodes")
+	return a
+}
+
+func (a *ProviderAWS) Prices() PriceInterface {
+	fmt.Println("price prices")
+	return a
+}
+
+func (a *ProviderAWS) List() ProviderNodes {
+	fmt.Println("price list")
 
 	data, err := ec2instancesinfo.Data()
 

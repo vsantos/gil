@@ -1,4 +1,4 @@
-package services
+package main
 
 import (
 	"context"
@@ -6,75 +6,67 @@ import (
 	"fmt"
 	"gil/calculator"
 	"gil/pricer"
+	"gil/services"
+	"log"
 	"math"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/client-go/kubernetes"
 )
 
-type ClusterPriceConf struct {
-	PricedNodes        pricer.ProviderNodes
-	ClusterPricedNodes map[string]ClusterNode
-	Client             *kubernetes.Clientset
-}
+var instanceTypes []string
 
-func (k *KubeConf) Pods(p pricer.ProviderNodes) ClusterPodsInterface {
-	var c ClusterPodsInterface
-	c = &ClusterPriceConf{
-		PricedNodes: p,
-		Client:      k.Client,
-	}
+const REGION = "sa-east-1"
+const NAMESPACE = "kong-system"
+const APPSELECTOR = "app=ingress-kong"
 
-	fmt.Println("price prices")
-	return c
-}
+func main() {
+	// List price for every AWS instance
+	var awsPrices pricer.Pricer
+	awsPrices = &pricer.ProviderAWS{}
+	priced := awsPrices.List()
 
-func (k *ClusterPriceConf) Prices() ClusterPriceInterface {
-	fmt.Println("listing cluster nodes")
-	// Get prices for all nodes within a specific cluster
-	nodes, err := GetNodes(k.Client, context.TODO())
+	c, err := services.NewKubeClient("", "")
 	if err != nil {
-		return nil
+		log.Panic(err)
 	}
 
-	if len(nodes) == 0 {
-		return nil
+	// Get prices for all nodes within a specific cluster
+	nodes, err := GetNodes(c, context.TODO())
+	if err != nil {
+		fmt.Println(err)
 	}
 
 	// Endup with a list of all instance types used within a specific cluster
 	// var cn []services.ClusterNode
 	// var cns map[string]services.ClusterNode
-	cns := make(map[string]ClusterNode)
+	cns := make(map[string]services.ClusterNode)
 	for _, node := range nodes {
 		hostType := node.Labels["node.kubernetes.io/instance-type"]
+		instanceTypes = append(instanceTypes, hostType)
 
-		cns[node.Name] = ClusterNode{
+		cns[node.Name] = services.ClusterNode{
 			Type:           hostType,
-			Region:         "sa-east-1",
-			Resources:      k.PricedNodes[hostType].Resources,
-			CalculatedCost: calculator.CalculateNodePrice(k.PricedNodes[hostType].Cost.RegionalCost.Value["sa-east-1"]),
+			Region:         REGION,
+			Resources:      priced[hostType].Resources,
+			CalculatedCost: calculator.CalculateNodePrice(priced[hostType].Cost.RegionalCost.Value[REGION]),
 		}
 	}
 
 	if len(cns) == 0 {
-		return nil
+		log.Panic(errors.New("Empty list of node prices"))
 	}
 
 	// Based on every instance type within a specific cluster, get it's general price
-	k.ClusterPricedNodes = cns
-	return k
-}
 
-func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calculator.NodePrice, error) {
-	var podSumPrices calculator.NodePrice
+	fmt.Println(cns)
 
 	// Now we can get all deployments
-	deployments, err := k.GetDeployments(context.TODO(), namespace, labelSelector)
+	deployments, err := GetDeployments(c, context.TODO(), NAMESPACE, APPSELECTOR)
 	if err != nil {
-		return calculator.NodePrice{}, err
+		log.Panic(err)
 	}
 
 	for _, deployment := range deployments {
@@ -82,29 +74,29 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calcula
 			fmt.Println("Deployment: ", deployment.Name)
 			rc, err := GetCPURequest(deployment)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				fmt.Println("error: ", err)
 			}
 
 			fmt.Println("Requests CPU: ", rc)
 
 			rm, err := GetMemoryRequest(deployment)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				fmt.Println("error: ", err)
 			}
 
 			fmt.Println("Requests Memory: ", rm)
 
-			pods, err := k.GetPods(context.TODO(), namespace, labelSelector)
+			pods, err := GetPods(c, context.TODO(), NAMESPACE, APPSELECTOR)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				fmt.Println("error: ", err)
 			}
 
 			fmt.Println("Associated pods num: ", len(pods))
-			fmt.Println(k.ClusterPricedNodes)
+			var podSumPrices calculator.NodePrice
 			for _, pod := range pods {
-				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, k.ClusterPricedNodes)
+				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, cns)
 				if err != nil {
-					return calculator.NodePrice{}, err
+					log.Panic(err)
 				}
 
 				podSumPrices.Hourly += rPrices.Hourly
@@ -121,11 +113,9 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calcula
 		}
 
 	}
-
-	return podSumPrices, nil
 }
 
-func ReturnPodPrice(replicas int32, podRequestCPU int64, podRequestMem int64, scheduledNode string, nodes map[string]ClusterNode) (calculator.NodePrice, error) {
+func ReturnPodPrice(replicas int32, podRequestCPU int64, podRequestMem int64, scheduledNode string, nodes map[string]services.ClusterNode) (calculator.NodePrice, error) {
 	if nodes[scheduledNode].Resources.VCPU == 0 || nodes[scheduledNode].Resources.MemoryGB == 0 {
 		return calculator.NodePrice{}, errors.New(fmt.Sprintf("empty VCPU and/org Memory attributes for node %s", scheduledNode))
 	}
@@ -171,9 +161,9 @@ func CalculatePercentageOfUsage(memPodRequestBytes float32, memoryNodeGB float32
 	return float32(memUsagePercentRounded)
 }
 
-func (k *ClusterPriceConf) GetDeployments(ctx context.Context, namespace string, selector string) ([]appsv1.Deployment, error) {
+func GetDeployments(clientset *kubernetes.Clientset, ctx context.Context, namespace string, selector string) ([]appsv1.Deployment, error) {
 
-	list, err := k.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
+	list, err := clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector,
 	})
 	if err != nil {
@@ -182,9 +172,9 @@ func (k *ClusterPriceConf) GetDeployments(ctx context.Context, namespace string,
 	return list.Items, nil
 }
 
-func (k *ClusterPriceConf) GetPods(ctx context.Context, namespace string, selector string) ([]corev1.Pod, error) {
+func GetPods(clientset *kubernetes.Clientset, ctx context.Context, namespace string, selector string) ([]corev1.Pod, error) {
 
-	list, err := k.Client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector,
 	})
 	if err != nil {
@@ -200,8 +190,7 @@ func GetCPURequest(d appsv1.Deployment) (requested int64, err error) {
 
 	isCPUZero := d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().IsZero()
 	if isCPUZero {
-		fmt.Println("could not find CPU for: ", d.Spec.Template.Spec.Containers[0].Name)
-		return 0, nil
+		return 0, errors.New(fmt.Sprint("could not find CPU for: ", d.Spec.Template.Spec.Containers[0].Name))
 	}
 
 	if !isCPUZero {
@@ -209,8 +198,7 @@ func GetCPURequest(d appsv1.Deployment) (requested int64, err error) {
 		if !cpuIsOK {
 			cpu, unscaledOk = d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().AsDec().Unscaled()
 			if !unscaledOk {
-				fmt.Println("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name)
-				return 0, nil
+				return 0, errors.New(fmt.Sprint("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name))
 			}
 
 		}
@@ -226,8 +214,7 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 
 	isMemoryZero := d.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().IsZero()
 	if isMemoryZero {
-		fmt.Println("could not find Memory for: ", d.Spec.Template.Spec.Containers[0].Name)
-		return 0, nil
+		return 0, errors.New(fmt.Sprint("could not find Memory for: ", d.Spec.Template.Spec.Containers[0].Name))
 	}
 
 	if !isMemoryZero {
@@ -235,8 +222,7 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 		if !memoryIsOK {
 			memory, unscaledOk = d.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().AsDec().Unscaled()
 			if !unscaledOk {
-				fmt.Println("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name)
-				return 0, nil
+				return 0, errors.New(fmt.Sprint("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name))
 			}
 
 		}
@@ -251,4 +237,16 @@ func GetNodes(clientset *kubernetes.Clientset, ctx context.Context) ([]corev1.No
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+func unique(s []string) []string {
+	inResult := make(map[string]bool)
+	var result []string
+	for _, str := range s {
+		if _, ok := inResult[str]; !ok {
+			inResult[str] = true
+			result = append(result, str)
+		}
+	}
+	return result
 }

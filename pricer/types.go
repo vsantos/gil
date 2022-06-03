@@ -1,8 +1,8 @@
-package price
+package pricer
 
-type Pricer interface {
-	List() ProviderNodes
-}
+// type Pricer interface {
+// 	List() ProviderNodes
+// }
 
 // Being the key the instanceType
 type ProviderNodes map[string]Node
