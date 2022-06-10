@@ -1,4 +1,4 @@
-package services
+package kube
 
 import (
 	"context"
@@ -21,19 +21,7 @@ type ClusterPriceConf struct {
 	Client             *kubernetes.Clientset
 }
 
-func (k *KubeConf) Pods(p pricer.ProviderNodes) ClusterPodsInterface {
-	var c ClusterPodsInterface
-	c = &ClusterPriceConf{
-		PricedNodes: p,
-		Client:      k.Client,
-	}
-
-	fmt.Println("price prices")
-	return c
-}
-
-func (k *ClusterPriceConf) Prices() ClusterPriceInterface {
-	fmt.Println("listing cluster nodes")
+func (k *KubeConf) Prices(p pricer.ProviderNodes) ClusterPriceInterface {
 	// Get prices for all nodes within a specific cluster
 	nodes, err := GetNodes(k.Client, context.TODO())
 	if err != nil {
@@ -45,8 +33,6 @@ func (k *ClusterPriceConf) Prices() ClusterPriceInterface {
 	}
 
 	// Endup with a list of all instance types used within a specific cluster
-	// var cn []services.ClusterNode
-	// var cns map[string]services.ClusterNode
 	cns := make(map[string]ClusterNode)
 	for _, node := range nodes {
 		hostType := node.Labels["node.kubernetes.io/instance-type"]
@@ -54,8 +40,8 @@ func (k *ClusterPriceConf) Prices() ClusterPriceInterface {
 		cns[node.Name] = ClusterNode{
 			Type:           hostType,
 			Region:         "sa-east-1",
-			Resources:      k.PricedNodes[hostType].Resources,
-			CalculatedCost: calculator.CalculateNodePrice(k.PricedNodes[hostType].Cost.RegionalCost.Value["sa-east-1"]),
+			Resources:      p[hostType].Resources,
+			CalculatedCost: calculator.CalculateNodePrice(p[hostType].Cost.RegionalCost.Value["sa-east-1"]),
 		}
 	}
 
@@ -64,8 +50,14 @@ func (k *ClusterPriceConf) Prices() ClusterPriceInterface {
 	}
 
 	// Based on every instance type within a specific cluster, get it's general price
-	k.ClusterPricedNodes = cns
-	return k
+	// k.ClusterPricedNodes = cns
+	// var c ClusterPodsInterface
+	c := &ClusterPriceConf{
+		PricedNodes:        p,
+		ClusterPricedNodes: cns,
+		Client:             k.Client,
+	}
+	return c
 }
 
 func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calculator.NodePrice, error) {
@@ -86,14 +78,12 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calcula
 			}
 
 			fmt.Println("Requests CPU: ", rc)
-
 			rm, err := GetMemoryRequest(deployment)
 			if err != nil {
 				return calculator.NodePrice{}, err
 			}
 
 			fmt.Println("Requests Memory: ", rm)
-
 			pods, err := k.GetPods(context.TODO(), namespace, labelSelector)
 			if err != nil {
 				return calculator.NodePrice{}, err
@@ -125,17 +115,27 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calcula
 	return podSumPrices, nil
 }
 
-func ReturnPodPrice(replicas int32, podRequestCPU int64, podRequestMem int64, scheduledNode string, nodes map[string]ClusterNode) (calculator.NodePrice, error) {
+func ReturnPodPrice(replicas int32, podRequestCPUMil float32, podRequestMemGB int64, scheduledNode string, nodes map[string]ClusterNode) (calculator.NodePrice, error) {
 	if nodes[scheduledNode].Resources.VCPU == 0 || nodes[scheduledNode].Resources.MemoryGB == 0 {
 		return calculator.NodePrice{}, errors.New(fmt.Sprintf("empty VCPU and/org Memory attributes for node %s", scheduledNode))
 	}
 
-	memUsagePercentRounded := CalculatePercentageOfUsage(float32(podRequestMem), nodes[scheduledNode].Resources.MemoryGB)
+	memUsagePercentRounded := CalculateMemPercentageOfUsage(float32(podRequestMemGB), nodes[scheduledNode].Resources.MemoryGB)
+	cpuUsagePercentRounded := CalculateCPUPercentageOfUsage(podRequestCPUMil, nodes[scheduledNode].Resources.VCPU)
 
-	c := CalculatePodPriceByUsage(memUsagePercentRounded, nodes[scheduledNode].CalculatedCost)
-	fmt.Println("original cost:", nodes[scheduledNode].CalculatedCost.Hourly)
-	fmt.Println("percent of cost:", c.Hourly)
+	// calculate price based on which resource is more consumed in %
+	var highestPercent float32
+	if memUsagePercentRounded > cpuUsagePercentRounded {
+		fmt.Println("Memory is more consumed than CPU, it will be used to calculate the pricing")
+		highestPercent = memUsagePercentRounded
+	}
 
+	if cpuUsagePercentRounded > memUsagePercentRounded {
+		fmt.Println("CPU is more consumed than memory, it will be used to calculate the pricing")
+		highestPercent = cpuUsagePercentRounded
+	}
+
+	c := CalculatePodPriceByUsage(highestPercent, nodes[scheduledNode].CalculatedCost)
 	return c, nil
 }
 
@@ -153,7 +153,13 @@ func CalculatePodPriceByUsage(memUsagePercentRounded float32, nodePrice calculat
 	}
 }
 
-func CalculatePercentageOfUsage(memPodRequestBytes float32, memoryNodeGB float32) float32 {
+func CalculateCPUPercentageOfUsage(cpuPodRequest float32, cpuNode int) float32 {
+	var p float32
+	p = (cpuPodRequest / float32(cpuNode)) * 100
+	return p
+}
+
+func CalculateMemPercentageOfUsage(memPodRequestBytes float32, memoryNodeGB float32) float32 {
 	var memPodRequestMB float32
 	var bytes float32
 	bytes = 1024
@@ -162,11 +168,6 @@ func CalculatePercentageOfUsage(memPodRequestBytes float32, memoryNodeGB float32
 	memoryNodeMB := (memoryNodeGB * 1024)
 	memUsagePercent := (memPodRequestMB / memoryNodeMB) * float32(100)
 	memUsagePercentRounded := math.Round(float64(memUsagePercent*100)) / 100
-
-	fmt.Println(memPodRequestMB)
-	fmt.Println(memoryNodeMB)
-	fmt.Println("% naked:", memUsagePercent)
-	fmt.Println("% round:", memUsagePercentRounded)
 
 	return float32(memUsagePercentRounded)
 }
@@ -193,10 +194,10 @@ func (k *ClusterPriceConf) GetPods(ctx context.Context, namespace string, select
 	return list.Items, nil
 }
 
-func GetCPURequest(d appsv1.Deployment) (requested int64, err error) {
+func GetCPURequest(d appsv1.Deployment) (requested float32, err error) {
 	var cpu int64
-	var cpuIsOK bool
-	var unscaledOk bool
+	// var cpuIsOK bool
+	// var unscaledOk bool
 
 	isCPUZero := d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().IsZero()
 	if isCPUZero {
@@ -205,18 +206,14 @@ func GetCPURequest(d appsv1.Deployment) (requested int64, err error) {
 	}
 
 	if !isCPUZero {
-		cpu, cpuIsOK = d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().AsInt64()
-		if !cpuIsOK {
-			cpu, unscaledOk = d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().AsDec().Unscaled()
-			if !unscaledOk {
-				fmt.Println("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name)
-				return 0, nil
-			}
-
-		}
+		cpu = d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().ToDec().MilliValue()
 	}
 
-	return cpu, nil
+	// return CPU in milicore
+	var cpuMil float32
+	cpuMil = float32(cpu) / 1000
+	fmt.Println("blu", cpuMil)
+	return cpuMil, nil
 }
 
 func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {

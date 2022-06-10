@@ -2,26 +2,26 @@ package main
 
 import (
 	"fmt"
+	kube "gil/pkg/services/kube"
 	"gil/pricer"
-	"gil/services"
 )
 
 type Giller struct {
 	Provider pricer.ProviderInterface
-	Cluster  services.ClusterInterface
+	Cluster  kube.ClusterInterface
 }
 
 func main() {
 	var f pricer.ProviderInterface
 	f = &pricer.ProviderAWS{}
 
-	kc := services.KubeClientConf{}
+	kc := kube.KubeClientConf{}
 	c, err := kc.NewKubeClient()
 	if err != nil {
 		panic(err)
 	}
-	var k services.ClusterInterface
-	k = &services.KubeConf{
+	var k kube.ClusterInterface
+	k = &kube.KubeConf{
 		Client: c,
 	}
 
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	pricedNodes := o.Provider.Nodes().Prices().List()
-	clusterPricedNodes, err := o.Cluster.Pods(pricedNodes).Prices().List("kong-system", "app=ingress-kong")
+	clusterPricedNodes, err := o.Cluster.Prices(pricedNodes).List("ext", "app=worker-sweep-account")
 	if err != nil {
 		panic(err)
 	}

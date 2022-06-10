@@ -28,7 +28,7 @@ func main() {
 	awsPrices = &pricer.ProviderAWS{}
 	priced := awsPrices.List()
 
-	c, err := services.NewKubeClient("", "")
+	c, err := kubernetes.NewKubeClient("", "")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -40,14 +40,14 @@ func main() {
 	}
 
 	// Endup with a list of all instance types used within a specific cluster
-	// var cn []services.ClusterNode
-	// var cns map[string]services.ClusterNode
-	cns := make(map[string]services.ClusterNode)
+	// var cn []kubernetes.ClusterNode
+	// var cns map[string]kubernetes.ClusterNode
+	cns := make(map[string]kubernetes.ClusterNode)
 	for _, node := range nodes {
 		hostType := node.Labels["node.kubernetes.io/instance-type"]
 		instanceTypes = append(instanceTypes, hostType)
 
-		cns[node.Name] = services.ClusterNode{
+		cns[node.Name] = kubernetes.ClusterNode{
 			Type:           hostType,
 			Region:         REGION,
 			Resources:      priced[hostType].Resources,
@@ -115,7 +115,7 @@ func main() {
 	}
 }
 
-func ReturnPodPrice(replicas int32, podRequestCPU int64, podRequestMem int64, scheduledNode string, nodes map[string]services.ClusterNode) (calculator.NodePrice, error) {
+func ReturnPodPrice(replicas int32, podRequestCPU int64, podRequestMem int64, scheduledNode string, nodes map[string]kubernetes.ClusterNode) (calculator.NodePrice, error) {
 	if nodes[scheduledNode].Resources.VCPU == 0 || nodes[scheduledNode].Resources.MemoryGB == 0 {
 		return calculator.NodePrice{}, errors.New(fmt.Sprintf("empty VCPU and/org Memory attributes for node %s", scheduledNode))
 	}

@@ -1,4 +1,4 @@
-package services
+package kube
 
 import (
 	"gil/calculator"
@@ -8,30 +8,12 @@ import (
 )
 
 type ClusterInterface interface {
-	Pods(pricer.ProviderNodes) ClusterPodsInterface
-	// Deployments() ClusterDeploymentsInterface
-	// Pods() ClusterPodsInterface
-}
-
-type ClusterPodsInterface interface {
-	Prices() ClusterPriceInterface
+	Prices(pricer.ProviderNodes) ClusterPriceInterface
 }
 
 type ClusterPriceInterface interface {
 	List(namespace string, labelSelector string) (calculator.NodePrice, error)
 }
-
-// type ProviderInterface interface {
-// 	Nodes() ProviderNodesInterface
-// }
-
-// type ProviderNodesInterface interface {
-// 	Prices() PriceInterface
-// }
-
-// type PriceInterface interface {
-// 	List() ProviderNodes
-// }
 
 type KubeClientConf struct {
 	// current cluster-context to be used
@@ -50,4 +32,10 @@ type ClusterNode struct {
 	Region         string
 	Resources      pricer.NodeResources
 	CalculatedCost calculator.NodePrice
+}
+type ClusterNodePrice struct {
+	RequestedMemory  float64
+	RequestedCPU     float64
+	PricedPod        calculator.NodePrice
+	PricedDeployment calculator.NodePrice
 }
