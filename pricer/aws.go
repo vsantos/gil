@@ -9,30 +9,18 @@ import (
 
 type ProviderAWS struct{}
 
-type ProviderInterface interface {
-	Nodes() ProviderNodesInterface
-}
-
-type ProviderNodesInterface interface {
-	Prices() PriceInterface
-}
-
-type PriceInterface interface {
-	List() ProviderNodes
-}
-
 func (a *ProviderAWS) Nodes() ProviderNodesInterface {
-	fmt.Println("price nodes")
+	// fmt.Println("price nodes")
 	return a
 }
 
 func (a *ProviderAWS) Prices() PriceInterface {
-	fmt.Println("price prices")
+	// fmt.Println("price prices")
 	return a
 }
 
 func (a *ProviderAWS) List() ProviderNodes {
-	fmt.Println("price list")
+	// fmt.Println("price list")
 
 	data, err := ec2instancesinfo.Data()
 

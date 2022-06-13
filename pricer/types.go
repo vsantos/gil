@@ -1,8 +1,16 @@
 package pricer
 
-// type Pricer interface {
-// 	List() ProviderNodes
-// }
+type ProviderInterface interface {
+	Nodes() ProviderNodesInterface
+}
+
+type ProviderNodesInterface interface {
+	Prices() PriceInterface
+}
+
+type PriceInterface interface {
+	List() ProviderNodes
+}
 
 // Being the key the instanceType
 type ProviderNodes map[string]Node

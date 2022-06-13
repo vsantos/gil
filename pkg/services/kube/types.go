@@ -12,7 +12,7 @@ type ClusterInterface interface {
 }
 
 type ClusterPriceInterface interface {
-	List(namespace string, labelSelector string) (calculator.NodePrice, error)
+	List(namespace string, labelSelector string) ([]ClusterNodePrice, error)
 }
 
 type KubeClientConf struct {
@@ -34,8 +34,12 @@ type ClusterNode struct {
 	CalculatedCost calculator.NodePrice
 }
 type ClusterNodePrice struct {
-	RequestedMemory  float64
-	RequestedCPU     float64
-	PricedPod        calculator.NodePrice
+	Kind             string
+	Name             string
+	Replicas         int32
+	Selector         string
+	RequestedMemory  int64
+	RequestedCPUMil  float32
+	PricedPod        []calculator.NodePrice
 	PricedDeployment calculator.NodePrice
 }

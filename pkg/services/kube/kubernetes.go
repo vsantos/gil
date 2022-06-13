@@ -8,6 +8,7 @@ import (
 	"gil/pricer"
 	"math"
 
+	log "github.com/sirupsen/logrus"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,59 +61,71 @@ func (k *KubeConf) Prices(p pricer.ProviderNodes) ClusterPriceInterface {
 	return c
 }
 
-func (k *ClusterPriceConf) List(namespace string, labelSelector string) (calculator.NodePrice, error) {
-	var podSumPrices calculator.NodePrice
+func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]ClusterNodePrice, error) {
+	var clusterPrices []ClusterNodePrice
+	var depPrices calculator.NodePrice
+	var podPrices []calculator.NodePrice
 
 	// Now we can get all deployments
 	deployments, err := k.GetDeployments(context.TODO(), namespace, labelSelector)
 	if err != nil {
-		return calculator.NodePrice{}, err
+		return []ClusterNodePrice{}, err
 	}
 
 	for _, deployment := range deployments {
 		if *deployment.Spec.Replicas != 0 {
-			fmt.Println("Deployment: ", deployment.Name)
+			log.Debug("Deployment: ", deployment.Name)
 			rc, err := GetCPURequest(deployment)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				return []ClusterNodePrice{}, err
 			}
 
-			fmt.Println("Requests CPU: ", rc)
+			log.Debug("Requests CPU: ", rc)
 			rm, err := GetMemoryRequest(deployment)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				return []ClusterNodePrice{}, err
 			}
 
-			fmt.Println("Requests Memory: ", rm)
+			log.Debug("Requests Memory: ", rm)
 			pods, err := k.GetPods(context.TODO(), namespace, labelSelector)
 			if err != nil {
-				return calculator.NodePrice{}, err
+				return []ClusterNodePrice{}, err
 			}
 
-			fmt.Println("Associated pods num: ", len(pods))
-			fmt.Println(k.ClusterPricedNodes)
+			log.Debug("Associated pods num: ", len(pods))
+			log.Debug(k.ClusterPricedNodes)
+
 			for _, pod := range pods {
 				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, k.ClusterPricedNodes)
 				if err != nil {
-					return calculator.NodePrice{}, err
+					return []ClusterNodePrice{}, err
 				}
+				podPrices = append(podPrices, rPrices)
 
-				podSumPrices.Hourly += rPrices.Hourly
-				podSumPrices.Daily += rPrices.Daily
-				podSumPrices.Weekly += rPrices.Weekly
-				podSumPrices.Monthly += rPrices.Monthly
-				podSumPrices.Yearly += rPrices.Yearly
+				depPrices.Hourly += rPrices.Hourly
+				depPrices.Daily += rPrices.Daily
+				depPrices.Weekly += rPrices.Weekly
+				depPrices.Monthly += rPrices.Monthly
+				depPrices.Yearly += rPrices.Yearly
 
-				fmt.Println(pod.Name)
-				fmt.Println("cost per pod: ", rPrices)
+				log.Debug(pod.Name)
+				log.Debug("cost per pod: ", rPrices)
 			}
 
-			fmt.Println("cost per deployment: ", podSumPrices)
+			clusterPrices = append(clusterPrices, ClusterNodePrice{
+				Kind:             deployment.Kind,
+				Name:             deployment.Name,
+				Selector:         labelSelector,
+				Replicas:         *deployment.Spec.Replicas,
+				RequestedMemory:  rm,
+				RequestedCPUMil:  rc,
+				PricedPod:        podPrices,
+				PricedDeployment: depPrices,
+			})
 		}
-
 	}
 
-	return podSumPrices, nil
+	return clusterPrices, nil
 }
 
 func ReturnPodPrice(replicas int32, podRequestCPUMil float32, podRequestMemGB int64, scheduledNode string, nodes map[string]ClusterNode) (calculator.NodePrice, error) {
@@ -126,12 +139,12 @@ func ReturnPodPrice(replicas int32, podRequestCPUMil float32, podRequestMemGB in
 	// calculate price based on which resource is more consumed in %
 	var highestPercent float32
 	if memUsagePercentRounded > cpuUsagePercentRounded {
-		fmt.Println("Memory is more consumed than CPU, it will be used to calculate the pricing")
+		log.Debug("Memory is more consumed than CPU, it will be used to calculate the pricing")
 		highestPercent = memUsagePercentRounded
 	}
 
 	if cpuUsagePercentRounded > memUsagePercentRounded {
-		fmt.Println("CPU is more consumed than memory, it will be used to calculate the pricing")
+		log.Debug("CPU is more consumed than memory, it will be used to calculate the pricing")
 		highestPercent = cpuUsagePercentRounded
 	}
 
@@ -201,7 +214,7 @@ func GetCPURequest(d appsv1.Deployment) (requested float32, err error) {
 
 	isCPUZero := d.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().IsZero()
 	if isCPUZero {
-		fmt.Println("could not find CPU for: ", d.Spec.Template.Spec.Containers[0].Name)
+		log.Debug("could not find CPU for: ", d.Spec.Template.Spec.Containers[0].Name)
 		return 0, nil
 	}
 
@@ -212,7 +225,6 @@ func GetCPURequest(d appsv1.Deployment) (requested float32, err error) {
 	// return CPU in milicore
 	var cpuMil float32
 	cpuMil = float32(cpu) / 1000
-	fmt.Println("blu", cpuMil)
 	return cpuMil, nil
 }
 
@@ -223,7 +235,7 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 
 	isMemoryZero := d.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().IsZero()
 	if isMemoryZero {
-		fmt.Println("could not find Memory for: ", d.Spec.Template.Spec.Containers[0].Name)
+		log.Debug("could not find Memory for: ", d.Spec.Template.Spec.Containers[0].Name)
 		return 0, nil
 	}
 
@@ -232,7 +244,7 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 		if !memoryIsOK {
 			memory, unscaledOk = d.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().AsDec().Unscaled()
 			if !unscaledOk {
-				fmt.Println("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name)
+				log.Error("could not get unscaled metrics for ", d.Spec.Template.Spec.Containers[0].Name)
 				return 0, nil
 			}
 
