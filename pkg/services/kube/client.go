@@ -52,6 +52,5 @@ func (k *KubeClientConf) NewKubeClient() (*kubernetes.Clientset, error) {
 		fmt.Printf("error getting Kubernetes clientset: %v\n", err)
 		return nil, err
 	}
-
 	return clientset, nil
 }

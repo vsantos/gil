@@ -41,22 +41,31 @@ func main() {
 	}
 
 	pricedNodes := o.Provider.Nodes().Prices().List()
-	clusterPricedNodes, err := o.Cluster.Prices(pricedNodes).List("my-namespace", "squad=my-squad")
+	i, err := o.Cluster.Prices(pricedNodes)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	clusterPricedNodes, err := i.List("namespace", "key1=value1")
 	if err != nil {
 		log.Panic(err)
 	}
+	if len(clusterPricedNodes) > 0 {
+		for _, priced := range clusterPricedNodes {
+			// show associated pods if needed
+			showPods := true
+			if !showPods {
+				priced.Deployment.Pods = []kube.ClusterPodPrice{}
+			}
 
-	for _, priced := range clusterPricedNodes {
-		log.WithFields(log.Fields{
-			"kind":                priced.Kind,
-			"replicas":            priced.Replicas,
-			"name":                priced.Name,
-			"selector":            priced.Selector,
-			"currency":            "USD",
-			"requested_memory_mb": ((priced.RequestedMemory / 1024) / 1024),
-			"requested_cpu_mil":   priced.RequestedCPUMil,
-			"price_deployment":    priced.PricedDeployment,
-			// "price_pods":       priced.PricedPod,
-		}).Info("Estimated costs")
+			logFields := log.Fields{
+				"selector":          priced.Selector,
+				"currency":          "USD",
+				"requested_memory":  priced.RequestedMemory,
+				"requested_cpu_mil": priced.RequestedCPUMil,
+				"deployment":        priced.Deployment,
+			}
+			log.WithFields(logFields).Info("Estimated costs")
+		}
 	}
 }

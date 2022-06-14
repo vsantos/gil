@@ -23,7 +23,7 @@ type KubeClientConf struct {
 }
 
 type KubeConf struct {
-	Client *kubernetes.Clientset
+	Client kubernetes.Interface
 	Region string
 }
 

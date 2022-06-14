@@ -19,7 +19,7 @@ import (
 type ClusterPriceConf struct {
 	PricedNodes        pricer.ProviderNodes
 	ClusterPricedNodes map[string]ClusterNode
-	Client             *kubernetes.Clientset
+	Client             kubernetes.Interface
 }
 
 func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error) {
@@ -34,7 +34,7 @@ func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error)
 	}
 
 	// Endup with a list of all instance types used within a specific cluster
-	log.Debug("getting prices for nodes deployed in region %s", k.Region)
+	log.Debug("getting prices for nodes deployed in region: ", k.Region)
 	cns := make(map[string]ClusterNode)
 	for _, node := range nodes {
 		hostType := node.Labels["node.kubernetes.io/instance-type"]
@@ -102,7 +102,7 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 			log.Debug(k.ClusterPricedNodes)
 
 			for _, pod := range pods {
-				log.Debug("fetching info for pod '%s'", pod.Name)
+				log.Debug("fetching info for pod: ", pod.Name)
 				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, k.ClusterPricedNodes)
 				if err != nil {
 					return []ClusterPrice{}, err
@@ -164,12 +164,18 @@ func PercentageChange(percent float32, total float32) float32 {
 }
 
 func CalculatePodPriceByUsage(memUsagePercentRounded float32, nodePrice calculator.NodePrice) calculator.NodePrice {
+	hourly := float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Hourly)))
+	daily := float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Daily)))
+	weekly := float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Weekly)))
+	monthly := float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Monthly)))
+	yearly := float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Yearly)))
+
 	return calculator.NodePrice{
-		Hourly:  float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Hourly))),
-		Daily:   float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Daily))),
-		Weekly:  float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Weekly))),
-		Monthly: float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Monthly))),
-		Yearly:  float64(PercentageChange(memUsagePercentRounded, float32(nodePrice.Yearly))),
+		Hourly:  calculator.RoundFloat(hourly, 4),
+		Daily:   calculator.RoundFloat(daily, 4),
+		Weekly:  calculator.RoundFloat(weekly, 4),
+		Monthly: calculator.RoundFloat(monthly, 4),
+		Yearly:  calculator.RoundFloat(yearly, 4),
 	}
 }
 
@@ -260,8 +266,8 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 	return memory, nil
 }
 
-func GetNodes(clientset *kubernetes.Clientset, ctx context.Context) ([]corev1.Node, error) {
-	list, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+func GetNodes(c kubernetes.Interface, ctx context.Context) ([]corev1.Node, error) {
+	list, err := c.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return []corev1.Node{}, err
 	}

@@ -34,8 +34,7 @@ var (
 				log.Fatal(err)
 			}
 
-			var k kube.ClusterInterface
-			k = &kube.KubeConf{
+			k := &kube.KubeConf{
 				Client: c,
 				Region: cmd.Flag("region").Value.String(),
 			}
@@ -61,7 +60,7 @@ var (
 			}
 
 			if len(clusterPricedNodes) == 0 {
-				log.Fatal("could not find any deployments returned by filter `-l '%s'`")
+				log.Fatal("could not find any deployments returned by filter -l ", cmd.Flag("label-selector").Value.String())
 			}
 
 			if len(clusterPricedNodes) > 0 {
