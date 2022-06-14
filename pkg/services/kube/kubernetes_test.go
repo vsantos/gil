@@ -317,8 +317,58 @@ func TestGetNodes(t *testing.T) {
 		Spec: corev1.NodeSpec{},
 	})
 
-	nodes, err := GetNodes(c, context.TODO())
+	k := &KubeConf{
+		Client: c,
+	}
+
+	nodes, err := k.GetNodes(c, context.TODO())
 	assert.Equal(t, err, nil)
 	assert.Equal(t, len(nodes), 1)
 	assert.Equal(t, nodes[0].Name, "fake-node-hostname")
+}
+
+func TestGetDeployments(t *testing.T) {
+	var c kubernetes.Interface
+	c = fake.NewSimpleClientset(&v1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-test-deployment",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app": "bar",
+			},
+		},
+	})
+
+	k := &ClusterPriceConf{
+		Client: c,
+	}
+
+	deps, err := k.GetDeployments(context.TODO(), "test-namespace", "app=bar")
+	assert.Equal(t, err, nil)
+	assert.Equal(t, len(deps), 1)
+	assert.Equal(t, deps[0].Name, "my-test-deployment")
+	assert.Equal(t, deps[0].Namespace, "test-namespace")
+}
+
+func TestGetPods(t *testing.T) {
+	var c kubernetes.Interface
+	c = fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-test-pod",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app": "foo",
+			},
+		},
+	})
+
+	k := &ClusterPriceConf{
+		Client: c,
+	}
+
+	pods, err := k.GetPods(context.TODO(), "test-namespace", "app=foo")
+	assert.Equal(t, err, nil)
+	assert.Equal(t, len(pods), 1)
+	assert.Equal(t, pods[0].Name, "my-test-pod")
+	assert.Equal(t, pods[0].Namespace, "test-namespace")
 }

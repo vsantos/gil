@@ -24,7 +24,7 @@ type ClusterPriceConf struct {
 
 func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error) {
 	// Get prices for all nodes within a specific cluster
-	nodes, err := GetNodes(k.Client, context.Background())
+	nodes, err := k.GetNodes(k.Client, context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 	return memory, nil
 }
 
-func GetNodes(c kubernetes.Interface, ctx context.Context) ([]corev1.Node, error) {
+func (k *KubeConf) GetNodes(c kubernetes.Interface, ctx context.Context) ([]corev1.Node, error) {
 	list, err := c.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return []corev1.Node{}, err
