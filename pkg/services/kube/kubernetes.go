@@ -22,32 +22,33 @@ type ClusterPriceConf struct {
 	Client             *kubernetes.Clientset
 }
 
-func (k *KubeConf) Prices(p pricer.ProviderNodes) ClusterPriceInterface {
+func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error) {
 	// Get prices for all nodes within a specific cluster
-	nodes, err := GetNodes(k.Client, context.TODO())
+	nodes, err := GetNodes(k.Client, context.Background())
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	if len(nodes) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Endup with a list of all instance types used within a specific cluster
+	log.Debug("getting prices for nodes deployed in region %s", k.Region)
 	cns := make(map[string]ClusterNode)
 	for _, node := range nodes {
 		hostType := node.Labels["node.kubernetes.io/instance-type"]
 
 		cns[node.Name] = ClusterNode{
 			Type:           hostType,
-			Region:         "sa-east-1",
+			Region:         k.Region,
 			Resources:      p[hostType].Resources,
-			CalculatedCost: calculator.CalculateNodePrice(p[hostType].Cost.RegionalCost.Value["sa-east-1"]),
+			CalculatedCost: calculator.CalculateNodePrice(p[hostType].Cost.RegionalCost.Value[k.Region]),
 		}
 	}
 
 	if len(cns) == 0 {
-		return nil
+		return nil, errors.New("non empty cluster nodes")
 	}
 
 	// Based on every instance type within a specific cluster, get it's general price
@@ -58,49 +59,55 @@ func (k *KubeConf) Prices(p pricer.ProviderNodes) ClusterPriceInterface {
 		ClusterPricedNodes: cns,
 		Client:             k.Client,
 	}
-	return c
+	return c, nil
 }
 
-func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]ClusterNodePrice, error) {
-	var clusterPrices []ClusterNodePrice
+func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]ClusterPrice, error) {
+	var clusterPrices []ClusterPrice
 	var depPrices calculator.NodePrice
-	var podPrices []calculator.NodePrice
+	var podPrices []ClusterPodPrice
 
 	// Now we can get all deployments
-	deployments, err := k.GetDeployments(context.TODO(), namespace, labelSelector)
+	deployments, err := k.GetDeployments(context.Background(), namespace, labelSelector)
 	if err != nil {
-		return []ClusterNodePrice{}, err
+		return []ClusterPrice{}, err
+	}
+
+	// In case of empty deployments, we assume that the selector didn't fetch any resource
+	if len(deployments) == 0 {
+		return []ClusterPrice{}, nil
 	}
 
 	for _, deployment := range deployments {
 		if *deployment.Spec.Replicas != 0 {
-			log.Debug("Deployment: ", deployment.Name)
+			log.Debug("fetching info for deployment: ", deployment.Name)
 			rc, err := GetCPURequest(deployment)
 			if err != nil {
-				return []ClusterNodePrice{}, err
+				return []ClusterPrice{}, err
 			}
 
-			log.Debug("Requests CPU: ", rc)
+			log.Debug("fetched requested CPU: ", rc)
 			rm, err := GetMemoryRequest(deployment)
 			if err != nil {
-				return []ClusterNodePrice{}, err
+				return []ClusterPrice{}, err
 			}
 
-			log.Debug("Requests Memory: ", rm)
-			pods, err := k.GetPods(context.TODO(), namespace, labelSelector)
+			log.Debug("fetched requested Memory: ", rm)
+			pods, err := k.GetPods(context.Background(), namespace, labelSelector)
 			if err != nil {
-				return []ClusterNodePrice{}, err
+				return []ClusterPrice{}, err
 			}
 
 			log.Debug("Associated pods num: ", len(pods))
 			log.Debug(k.ClusterPricedNodes)
 
 			for _, pod := range pods {
+				log.Debug("fetching info for pod '%s'", pod.Name)
 				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, k.ClusterPricedNodes)
 				if err != nil {
-					return []ClusterNodePrice{}, err
+					return []ClusterPrice{}, err
 				}
-				podPrices = append(podPrices, rPrices)
+				podPrices = append(podPrices, ClusterPodPrice{Name: pod.Name, Prices: rPrices})
 
 				depPrices.Hourly += rPrices.Hourly
 				depPrices.Daily += rPrices.Daily
@@ -108,19 +115,19 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 				depPrices.Monthly += rPrices.Monthly
 				depPrices.Yearly += rPrices.Yearly
 
-				log.Debug(pod.Name)
-				log.Debug("cost per pod: ", rPrices)
+				log.Debug("fetched individual pod prices:", rPrices)
 			}
 
-			clusterPrices = append(clusterPrices, ClusterNodePrice{
-				Kind:             deployment.Kind,
-				Name:             deployment.Name,
-				Selector:         labelSelector,
-				Replicas:         *deployment.Spec.Replicas,
-				RequestedMemory:  rm,
-				RequestedCPUMil:  rc,
-				PricedPod:        podPrices,
-				PricedDeployment: depPrices,
+			clusterPrices = append(clusterPrices, ClusterPrice{
+				Selector:        labelSelector,
+				RequestedMemory: rm,
+				RequestedCPUMil: rc,
+				Deployment: ClusterDeploymentPrice{
+					Name:     deployment.Name,
+					Replicas: *deployment.Spec.Replicas,
+					Prices:   depPrices,
+					Pods:     podPrices,
+				},
 			})
 		}
 	}
@@ -186,7 +193,6 @@ func CalculateMemPercentageOfUsage(memPodRequestBytes float32, memoryNodeGB floa
 }
 
 func (k *ClusterPriceConf) GetDeployments(ctx context.Context, namespace string, selector string) ([]appsv1.Deployment, error) {
-
 	list, err := k.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector,
 	})
@@ -255,9 +261,9 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 }
 
 func GetNodes(clientset *kubernetes.Clientset, ctx context.Context) ([]corev1.Node, error) {
-	list, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	list, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		return nil, err
+		return []corev1.Node{}, err
 	}
 	return list.Items, nil
 }

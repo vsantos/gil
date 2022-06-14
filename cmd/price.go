@@ -19,58 +19,72 @@ type Giller struct {
 }
 
 // priceCmd represents the price command
-var priceCmd = &cobra.Command{
-	Use:   "price",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+var (
+	priceCmd = &cobra.Command{
+		Use:   "price",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			var f pricer.ProviderInterface
+			f = &pricer.ProviderAWS{}
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		var f pricer.ProviderInterface
-		f = &pricer.ProviderAWS{}
+			kc := kube.KubeClientConf{}
+			c, err := kc.NewKubeClient()
+			if err != nil {
+				log.Fatal(err)
+			}
 
-		kc := kube.KubeClientConf{}
-		c, err := kc.NewKubeClient()
-		if err != nil {
-			panic(err)
-		}
-		var k kube.ClusterInterface
-		k = &kube.KubeConf{
-			Client: c,
-		}
+			var k kube.ClusterInterface
+			k = &kube.KubeConf{
+				Client: c,
+				Region: cmd.Flag("region").Value.String(),
+			}
 
-		o := Giller{
-			Provider: f,
-			Cluster:  k,
-		}
+			o := Giller{
+				Provider: f,
+				Cluster:  k,
+			}
 
-		pricedNodes := o.Provider.Nodes().Prices().List()
-		clusterPricedNodes, err := o.Cluster.Prices(pricedNodes).List(
-			cmd.Flag("namespace").Value.String(),
-			cmd.Flag("label-selector").Value.String(),
-		)
-		if err != nil {
-			panic(err)
-		}
+			pricedNodes := o.Provider.Nodes().Prices().List()
 
-		for _, priced := range clusterPricedNodes {
-			log.WithFields(log.Fields{
-				"kind":              priced.Kind,
-				"replicas":          priced.Replicas,
-				"name":              priced.Name,
-				"selector":          priced.Selector,
-				"currency":          "USD",
-				"requested_memory":  priced.RequestedMemory,
-				"requested_cpu_mil": priced.RequestedCPUMil,
-				"price_deployment":  priced.PricedDeployment,
-				// "price_pods":       priced.PricedPod,
-			}).Info("Estimated costs")
-		}
-	},
-}
+			i, err := o.Cluster.Prices(pricedNodes)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			clusterPricedNodes, err := i.List(
+				cmd.Flag("namespace").Value.String(),
+				cmd.Flag("label-selector").Value.String(),
+			)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if len(clusterPricedNodes) == 0 {
+				log.Fatal("could not find any deployments returned by filter `-l '%s'`")
+			}
+
+			if len(clusterPricedNodes) > 0 {
+				for _, priced := range clusterPricedNodes {
+					// show associated pods if needed
+					showPods, _ := cmd.Flags().GetBool("show-pods")
+					if !showPods {
+						priced.Deployment.Pods = []kube.ClusterPodPrice{}
+					}
+
+					logFields := log.Fields{
+						"selector":          priced.Selector,
+						"currency":          "USD",
+						"requested_memory":  priced.RequestedMemory,
+						"requested_cpu_mil": priced.RequestedCPUMil,
+						"deployment":        priced.Deployment,
+					}
+					log.WithFields(logFields).Info("Estimated costs")
+				}
+			}
+		},
+	}
+)
 
 func init() {
 	rootCmd.AddCommand(priceCmd)
@@ -84,4 +98,5 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	priceCmd.Flags().StringP("region", "r", "sa-east-1", "Price region where the instances are based")
+	priceCmd.Flags().Bool("show-pods", false, "List individual pods price from a Deployment")
 }

@@ -41,21 +41,21 @@ func main() {
 	}
 
 	pricedNodes := o.Provider.Nodes().Prices().List()
-	clusterPricedNodes, err := o.Cluster.Prices(pricedNodes).List("ext", "squad=psm-transactions")
+	clusterPricedNodes, err := o.Cluster.Prices(pricedNodes).List("my-namespace", "squad=my-squad")
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	for _, priced := range clusterPricedNodes {
 		log.WithFields(log.Fields{
-			"kind":              priced.Kind,
-			"replicas":          priced.Replicas,
-			"name":              priced.Name,
-			"selector":          priced.Selector,
-			"currency":          "USD",
-			"requested_memory":  priced.RequestedMemory,
-			"requested_cpu_mil": priced.RequestedCPUMil,
-			"price_deployment":  priced.PricedDeployment,
+			"kind":                priced.Kind,
+			"replicas":            priced.Replicas,
+			"name":                priced.Name,
+			"selector":            priced.Selector,
+			"currency":            "USD",
+			"requested_memory_mb": ((priced.RequestedMemory / 1024) / 1024),
+			"requested_cpu_mil":   priced.RequestedCPUMil,
+			"price_deployment":    priced.PricedDeployment,
 			// "price_pods":       priced.PricedPod,
 		}).Info("Estimated costs")
 	}

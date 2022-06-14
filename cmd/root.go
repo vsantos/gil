@@ -15,16 +15,16 @@ import (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "gil",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "Get estimated node costs based on CPU/Mem requests",
+	Long: `Gil is a binary that allows to retrieve your deployments estimated costs
+based on it's CPU and Memory requests using label-selector as filter. With this
+information gil is able to calculate the percent of usage from it's pods within a
+node. The method of calculation is very simple and not covers limits or fluctuations.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+You can also retrieve individual pod costs along with it's deployment by '--show-labels'
+
+The only supported provider for now is 'AWS'. Which means the Gil is only able to estimate
+costs from pods running within ec2 instances.`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

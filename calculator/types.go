@@ -5,9 +5,9 @@ type Calculator interface {
 }
 
 type NodePrice struct {
-	Hourly  float64
-	Daily   float64
-	Weekly  float64
-	Monthly float64
-	Yearly  float64
+	Hourly  float64 `json:"hourly"`
+	Daily   float64 `json:"daily"`
+	Weekly  float64 `json:"weekly"`
+	Monthly float64 `json:"monthly"`
+	Yearly  float64 `json:"yearly"`
 }

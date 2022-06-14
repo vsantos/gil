@@ -8,11 +8,11 @@ import (
 )
 
 type ClusterInterface interface {
-	Prices(pricer.ProviderNodes) ClusterPriceInterface
+	Prices(pricer.ProviderNodes) (ClusterPriceInterface, error)
 }
 
 type ClusterPriceInterface interface {
-	List(namespace string, labelSelector string) ([]ClusterNodePrice, error)
+	List(namespace string, labelSelector string) ([]ClusterPrice, error)
 }
 
 type KubeClientConf struct {
@@ -24,22 +24,31 @@ type KubeClientConf struct {
 
 type KubeConf struct {
 	Client *kubernetes.Clientset
+	Region string
 }
 
 type ClusterNode struct {
-	// Host           string
 	Type           string
 	Region         string
 	Resources      pricer.NodeResources
 	CalculatedCost calculator.NodePrice
 }
-type ClusterNodePrice struct {
-	Kind             string
-	Name             string
-	Replicas         int32
-	Selector         string
-	RequestedMemory  int64
-	RequestedCPUMil  float32
-	PricedPod        []calculator.NodePrice
-	PricedDeployment calculator.NodePrice
+
+type ClusterPodPrice struct {
+	Name   string               `json:"name,omitempty"`
+	Prices calculator.NodePrice `json:"prices,omitempty"`
+}
+
+type ClusterDeploymentPrice struct {
+	Name     string               `json:"name,omitempty"`
+	Replicas int32                `json:"replicas,omitempty"`
+	Prices   calculator.NodePrice `json:"prices,omitempty"`
+	Pods     []ClusterPodPrice    `json:"pods,omitempty"`
+}
+
+type ClusterPrice struct {
+	Selector        string                 `json:"selector,omitempty"`
+	RequestedMemory int64                  `json:"requested_memory,omitempty"`
+	RequestedCPUMil float32                `json:"requested_cpu_mil,omitempty"`
+	Deployment      ClusterDeploymentPrice `json:"deployment,omitempty"`
 }
