@@ -15,10 +15,10 @@ func CalculateNodePrice(hourlyPrice float64) NodePrice {
 	yearly := monthly * 12
 
 	return NodePrice{
-		Hourly:  RoundFloat(hourly, 2),
-		Daily:   RoundFloat(daily, 2),
-		Weekly:  RoundFloat(weekly, 2),
-		Monthly: RoundFloat(monthly, 2),
-		Yearly:  RoundFloat(yearly, 2),
+		Hourly:  RoundFloat(hourly, 4),
+		Daily:   RoundFloat(daily, 4),
+		Weekly:  RoundFloat(weekly, 4),
+		Monthly: RoundFloat(monthly, 4),
+		Yearly:  RoundFloat(yearly, 4),
 	}
 }
