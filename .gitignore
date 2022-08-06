@@ -1,2 +1,4 @@
 bin/
 test_result.txt
+.history
+dist/
