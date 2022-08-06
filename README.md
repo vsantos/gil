@@ -29,3 +29,5 @@ for l in $(kubectl get deployment -n $NAMESPACE --show-labels --no-headers | awk
   ./gil price -n $NAMESPACE -l $l --show-pods | jq
 done
 ```
+
+Also, the `--label-selector` must be unique. If you try to search resources with shared selectors such as `squad=mysquad` or `env=prod` we won't know the parent deployment from a given pod when fetching them. For now, we are not backtracking "pod -> replicaSet -> deployment" based on `deployment.Name` to correctly correlate the prices, we infer only by using selectors alone: "selector (unique and same for `Kind: deployment`) -> pod".
