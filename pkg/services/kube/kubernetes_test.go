@@ -321,7 +321,7 @@ func TestGetNodes(t *testing.T) {
 		Client: c,
 	}
 
-	nodes, err := k.GetNodes(c, context.TODO())
+	nodes, err := k.GetNodes(context.TODO(), c)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, len(nodes), 1)
 	assert.Equal(t, nodes[0].Name, "fake-node-hostname")
@@ -352,23 +352,56 @@ func TestGetDeployments(t *testing.T) {
 
 func TestGetPods(t *testing.T) {
 	var c kubernetes.Interface
-	c = fake.NewSimpleClientset(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-test-pod",
-			Namespace: "test-namespace",
-			Labels: map[string]string{
-				"app": "foo",
+	c = fake.NewSimpleClientset(
+		// This pod needs to be returned
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-deployment-422-7ff6f87744-fclqn",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "foo",
+				},
 			},
 		},
-	})
+		// This pod can't be returned due to REGEXP match from GetPods()
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "start-test-deployment-422-7ff6f87744-fclqn",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "foo",
+				},
+			},
+		},
+		// This pod can't be returned due to REGEXP match from GetPods()
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "random-pod-with-same-selector-7ff6f87744-fclqn",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "foo",
+				},
+			},
+		},
+		// This pod can't be returned due different namespace
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-deployment-422-7ff6f87744-fclqn2",
+				Namespace: "namespace",
+				Labels: map[string]string{
+					"app": "foo",
+				},
+			},
+		},
+	)
 
 	k := &ClusterPriceConf{
 		Client: c,
 	}
 
-	pods, err := k.GetPods(context.TODO(), "test-namespace", "app=foo")
+	pods, err := k.GetPods(context.TODO(), "test-namespace", "test-deployment-422", "app=foo")
 	assert.Equal(t, err, nil)
 	assert.Equal(t, len(pods), 1)
-	assert.Equal(t, pods[0].Name, "my-test-pod")
+	assert.Equal(t, pods[0].Name, "test-deployment-422-7ff6f87744-fclqn")
 	assert.Equal(t, pods[0].Namespace, "test-namespace")
 }

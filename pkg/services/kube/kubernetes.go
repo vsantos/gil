@@ -7,6 +7,7 @@ import (
 	"gil/calculator"
 	"gil/pricer"
 	"math"
+	"regexp"
 
 	log "github.com/sirupsen/logrus"
 	appsv1 "k8s.io/api/apps/v1"
@@ -24,7 +25,7 @@ type ClusterPriceConf struct {
 
 func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error) {
 	// Get prices for all nodes within a specific cluster
-	nodes, err := k.GetNodes(k.Client, context.Background())
+	nodes, err := k.GetNodes(context.Background(), k.Client)
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +63,7 @@ func (k *KubeConf) Prices(p pricer.ProviderNodes) (ClusterPriceInterface, error)
 	return c, nil
 }
 
+// List will return all estimated costs for deployments from a given namespace and labelselector
 func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]ClusterPrice, error) {
 	var clusterPrices []ClusterPrice
 	var depPrices calculator.NodePrice
@@ -79,6 +81,8 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 	}
 
 	for _, deployment := range deployments {
+		// clusterPrices = []ClusterPrice{}
+		depPrices = calculator.NodePrice{}
 		if *deployment.Spec.Replicas != 0 {
 			log.Debug("fetching info for deployment: ", deployment.Name)
 			rc, err := GetCPURequest(deployment)
@@ -93,7 +97,7 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 			}
 
 			log.Debug("fetched requested Memory: ", rm)
-			pods, err := k.GetPods(context.Background(), namespace, labelSelector)
+			pods, err := k.GetPods(context.Background(), namespace, deployment.Name, labelSelector)
 			if err != nil {
 				return []ClusterPrice{}, err
 			}
@@ -101,6 +105,7 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 			log.Debug("Associated pods num: ", len(pods))
 			log.Debug(k.ClusterPricedNodes)
 
+			podPrices = []ClusterPodPrice{}
 			for _, pod := range pods {
 				log.Debug("fetching info for pod: ", pod.Name)
 				rPrices, err := ReturnPodPrice(*deployment.Spec.Replicas, rc, rm, pod.Spec.NodeName, k.ClusterPricedNodes)
@@ -135,9 +140,11 @@ func (k *ClusterPriceConf) List(namespace string, labelSelector string) ([]Clust
 	return clusterPrices, nil
 }
 
+// ReturnPodPrice will return the individual pod price based on the highest cost for either CPU or Memory request.
+// It will compare the percentage of request from a scheduled node type and gets it's estimated cost.
 func ReturnPodPrice(replicas int32, podRequestCPUMil float32, podRequestMemGB int64, scheduledNode string, nodes map[string]ClusterNode) (calculator.NodePrice, error) {
 	if nodes[scheduledNode].Resources.VCPU == 0 || nodes[scheduledNode].Resources.MemoryGB == 0 {
-		return calculator.NodePrice{}, errors.New(fmt.Sprintf("empty VCPU and/org Memory attributes for node %s", scheduledNode))
+		return calculator.NodePrice{}, fmt.Errorf("empty VCPU and/org Memory attributes for node %s", scheduledNode)
 	}
 
 	memUsagePercentRounded := CalculateMemPercentageOfUsage(float32(podRequestMemGB), nodes[scheduledNode].Resources.MemoryGB)
@@ -179,6 +186,7 @@ func CalculatePodPriceByUsage(memUsagePercentRounded float32, nodePrice calculat
 	}
 }
 
+// CalculateCPUPercentageOfUsage
 func CalculateCPUPercentageOfUsage(cpuPodRequest float32, cpuNode int) float32 {
 	var p float32
 	p = (cpuPodRequest / float32(cpuNode)) * 100
@@ -198,6 +206,7 @@ func CalculateMemPercentageOfUsage(memPodRequestBytes float32, memoryNodeGB floa
 	return float32(memUsagePercentRounded)
 }
 
+// GetDeployments will return a list of deployments based on labelSelector
 func (k *ClusterPriceConf) GetDeployments(ctx context.Context, namespace string, selector string) ([]appsv1.Deployment, error) {
 	list, err := k.Client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector,
@@ -208,7 +217,9 @@ func (k *ClusterPriceConf) GetDeployments(ctx context.Context, namespace string,
 	return list.Items, nil
 }
 
-func (k *ClusterPriceConf) GetPods(ctx context.Context, namespace string, selector string) ([]corev1.Pod, error) {
+// GetPods will return a list of pods based on labelSelector and filtered by parent deployment
+func (k *ClusterPriceConf) GetPods(ctx context.Context, namespace string, deployment string, selector string) ([]corev1.Pod, error) {
+	var filteredPods []corev1.Pod
 
 	list, err := k.Client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector,
@@ -216,9 +227,19 @@ func (k *ClusterPriceConf) GetPods(ctx context.Context, namespace string, select
 	if err != nil {
 		return nil, err
 	}
-	return list.Items, nil
+
+	rQuery := fmt.Sprintf("^%s.+", deployment)
+	for _, pod := range list.Items {
+		isChild, _ := regexp.MatchString(rQuery, pod.Name)
+		if isChild {
+			filteredPods = append(filteredPods, pod)
+		}
+	}
+
+	return filteredPods, nil
 }
 
+// GetCPURequest will return the CPU request from a given .Deployment object
 func GetCPURequest(d appsv1.Deployment) (requested float32, err error) {
 	var cpu int64
 	// var cpuIsOK bool
@@ -240,6 +261,7 @@ func GetCPURequest(d appsv1.Deployment) (requested float32, err error) {
 	return cpuMil, nil
 }
 
+// GetMemoryRequest will return the CPU request from a given .Deployment object
 func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 	var memory int64
 	var memoryIsOK bool
@@ -266,7 +288,8 @@ func GetMemoryRequest(d appsv1.Deployment) (requested int64, err error) {
 	return memory, nil
 }
 
-func (k *KubeConf) GetNodes(c kubernetes.Interface, ctx context.Context) ([]corev1.Node, error) {
+// GetNodes will return a list of nodes from a given cluster
+func (k *KubeConf) GetNodes(ctx context.Context, c kubernetes.Interface) ([]corev1.Node, error) {
 	list, err := c.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return []corev1.Node{}, err

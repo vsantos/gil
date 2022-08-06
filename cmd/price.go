@@ -64,22 +64,27 @@ var (
 			}
 
 			if len(clusterPricedNodes) > 0 {
-				for _, priced := range clusterPricedNodes {
-					// show associated pods if needed
-					showPods, _ := cmd.Flags().GetBool("show-pods")
-					if !showPods {
+				showPods, _ := cmd.Flags().GetBool("show-pods")
+				if !showPods {
+					clusterPricedWithoutPods := []kube.ClusterPrice{}
+					for _, priced := range clusterPricedNodes {
 						priced.Deployment.Pods = []kube.ClusterPodPrice{}
+						clusterPricedWithoutPods = append(clusterPricedWithoutPods, priced)
 					}
 
-					logFields := log.Fields{
-						"selector":          priced.Selector,
-						"currency":          "USD",
-						"requested_memory":  priced.RequestedMemory,
-						"requested_cpu_mil": priced.RequestedCPUMil,
-						"deployment":        priced.Deployment,
+					lField := log.Fields{
+						"currency":    "USD",
+						"deployments": clusterPricedWithoutPods,
 					}
-					log.WithFields(logFields).Info("Estimated costs")
+					log.WithFields(lField).Info("Estimated costs")
+					return
 				}
+
+				lField := log.Fields{
+					"currency":    "USD",
+					"deployments": clusterPricedNodes,
+				}
+				log.WithFields(lField).Info("Estimated costs")
 			}
 		},
 	}
